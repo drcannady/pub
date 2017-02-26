@@ -1,19 +1,21 @@
 # Source code for the paper:
 # Early Stablizing Feature Importance for TensorFlow Deep Neural Networks
 #
-# Copyright 2016 by Jeff Heaton, Steven McElwee, & James Cannady, Ph.D.
-# Note: this version was tested with Google TensorFlow 0.80.
-# (this is the version that was used to generate the published results)
+# Copyright 2016 by Jeff Heaton, Steven McElwee, James Cannady, Ph.D., & Jim Fraley
+# Updated for Google TensorFlow 1.0
+# Presented at IJCNN 2017.
 from sklearn import preprocessing
-from sklearn.cross_validation import train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn import metrics
-import tensorflow.contrib.learn as skflow
+import tensorflow.contrib.learn as learn
+import tensorflow as tf
 import pandas as pd
 import os
 import numpy as np
 import codecs
 import csv
 import random
+import shutil
 
 ENCODING = 'utf-8'
 SHOW_RANKS = False
@@ -79,6 +81,16 @@ def to_xy(df, target):
         # Regression
         return df.as_matrix(result).astype(np.float32), df.as_matrix([target]).astype(np.float32)
 
+# Get a new directory to hold checkpoints from a neural network.  This allows the neural network to be
+# loaded later.  If the erase param is set to true, the contents of the directory will be cleared.
+def get_model_dir(name,erase):
+    base_path = os.path.join(".","dnn")
+    model_dir = os.path.join(base_path,name)
+    os.makedirs(model_dir,exist_ok=True)
+    if erase and len(model_dir)>4 and os.path.isdir(model_dir):
+        shutil.rmtree(model_dir,ignore_errors=True) # be careful, this deletes everything below the specified path
+    return model_dir
+
 
 def rank_diff(r1, r2):
     r1_temp = sorted(r1, key=lambda x: x[2])
@@ -139,7 +151,13 @@ class InputPerturbationRank(Ranking):
         for i in range(x.shape[1]):
             hold = np.array(x[:, i])
             np.random.shuffle(x[:, i])
-            pred = network.predict(x)
+
+            # Handle both TensorFlow and SK-Learn models.
+            if 'tensorflow' in str(type(network)).lower():
+                pred = list(network.predict(x, as_iterable=True))
+            else:
+                pred = network.predict(x)
+
             rmse = metrics.mean_squared_error(y, pred)
             impt[i] = rmse
             x[:, i] = hold
@@ -157,7 +175,7 @@ class WeightRank(Ranking):
         super(WeightRank, self).__init__(names)
 
     def rank(self, x, y, network):
-        weights = network.get_tensor_value('dnn/layer0/Linear/Matrix:0')
+        weights = network.get_variable_value('dnn/hiddenlayer_0/weights')
         weights = weights ** 2
         weights = np.sum(weights, axis=1)
         weights = np.sqrt(weights)
@@ -172,7 +190,7 @@ class HybridRank(InputPerturbationRank):
         super(HybridRank, self).__init__(names)
 
     def weight_vector(self, network):
-        weights = network.get_tensor_value('dnn/layer0/Linear/Matrix:0')
+        weights = network.get_variable_value('dnn/hiddenlayer_0/weights')
         weights = weights ** 2
         weights = np.sum(weights, axis=1)
         weights = np.sqrt(weights)
@@ -205,14 +223,30 @@ def rank_compare_experiment(x, y, names, ranker1, ranker2):
     x_train, x_test, y_train, y_test = train_test_split(
         x, y, test_size=0.25, random_state=42)
 
-    model = skflow.TensorFlowDNNRegressor(hidden_units=HIDDEN_UNITS, steps=50000,
-                optimizer=OPTIMIZER, learning_rate=LEARN_RATE, batch_size = BATCH_SIZE)
-    early_stop = skflow.monitors.ValidationMonitor(x_test, y_test,
-                                                   early_stopping_rounds=200, print_steps=50)
+    # Get/clear a directory to store the neural network to
+    model_dir = get_model_dir('mpg', True)
 
-    model.fit(x_train, y_train, monitor=early_stop)
+    # Create a deep neural network
+    feature_columns = [tf.contrib.layers.real_valued_column("", dimension=x.shape[0])]
+    model = learn.DNNRegressor(
+        model_dir=model_dir,
+        feature_columns=feature_columns,
+        hidden_units=HIDDEN_UNITS)
 
-    pred = model.predict(x_test)
+    # Early stopping
+    early_stop = tf.contrib.learn.monitors.ValidationMonitor(
+        x_test,
+        y_test,
+        every_n_steps=50,
+        # metrics=validation_metrics,
+        early_stopping_metric="loss",
+        early_stopping_metric_minimize=True,
+        early_stopping_rounds=200)
+
+    model.fit(x_train, y_train, monitors=[early_stop], steps=10000)
+
+    pred = list(model.predict(x_test, as_iterable=True))
+
     rmse = metrics.mean_squared_error(y_test, pred)
     print("RMSE: {}".format(rmse))
 
@@ -241,18 +275,35 @@ def rank_stability_experiment(x, y, names, ranker_class):
         x, y, test_size=0.25, random_state=45)
 
     random.seed(42)
-    model = skflow.TensorFlowDNNRegressor(hidden_units=HIDDEN_UNITS, steps=50000,
-                optimizer=OPTIMIZER, learning_rate=LEARN_RATE, batch_size = BATCH_SIZE)
-    early_stop = skflow.monitors.ValidationMonitor(x_test, y_test,
-                                                   early_stopping_rounds=200, print_steps=50)
 
-    model.fit(x_train, y_train, monitor=early_stop)
+    # Get/clear a directory to store the neural network to
+    model_dir = get_model_dir('mpg', True)
 
-    pred = model.predict(x_test)
+    # Create a deep neural network
+    feature_columns = [tf.contrib.layers.real_valued_column("", dimension=x.shape[0])]
+    model = learn.DNNRegressor(
+        model_dir=model_dir,
+        feature_columns=feature_columns,
+        hidden_units=HIDDEN_UNITS)
+
+    # Early stopping
+    early_stop = tf.contrib.learn.monitors.ValidationMonitor(
+        x_test,
+        y_test,
+        every_n_steps=50,
+        # metrics=validation_metrics,
+        early_stopping_metric="loss",
+        early_stopping_metric_minimize=True,
+        early_stopping_rounds=200)
+
+    model.fit(x_train, y_train, monitors=[early_stop], steps=10000)
+
+    pred = list(model.predict(x_test, as_iterable=True))
+
     score = np.sqrt(metrics.mean_squared_error(pred,y_test))
     print("RMSE: {}".format(score))
     baseline_rank = InputPerturbationRank(names).rank(x, y, model)
-    steps_needed = int(model._monitor.min_loss_i)
+    steps_needed = int(early_stop._last_successful_step)
     steps_inc = int(steps_needed / 20)
 
     # Step 2, rate stability up to that point
@@ -271,9 +322,11 @@ def rank_stability_experiment(x, y, names, ranker_class):
         for i in range(20):
             steps = i * steps_inc
             random.seed(42)
-            model = skflow.TensorFlowDNNRegressor(hidden_units=HIDDEN_UNITS, steps=steps,
-                    optimizer=OPTIMIZER, learning_rate=LEARN_RATE, batch_size = BATCH_SIZE)
-            model.fit(x, y, monitor=skflow.monitors.BaseMonitor(100000))
+            feature_columns = [tf.contrib.layers.real_valued_column("", dimension=x.shape[0])]
+            model = learn.DNNRegressor(
+                model_dir=model_dir,
+                feature_columns=feature_columns,
+                hidden_units=HIDDEN_UNITS)
 
             r_base = ranker_base.rank(x, y, model)
             r_test = ranker.rank(x, y, model)
@@ -376,14 +429,15 @@ def load_wcbreast():
 
 def main():
     # Choose the dataset to use
-    #names, x, y = load_auto_mpg()
+    names, x, y = load_auto_mpg()
     #names, x, y = load_bupa()
     #names, x, y = load_wcbreast()
 
     # Choose the experiment to run
-    #rank_compare_experiment(x, y, names, InputPerturbationRank, CorrelationCoefficientRank)
+    rank_compare_experiment(x, y, names, InputPerturbationRank, CorrelationCoefficientRank)
     #rank_compare_experiment(x, y, names, WeightRank, InputPerturbationRank)
-    rank_stability_experiment(x, y, names, HybridRank)
+    #rank_stability_experiment(x, y, names, HybridRank)
 
-
+tf.logging.set_verbosity(tf.logging.ERROR)
+print(tf.__version__)
 main()
