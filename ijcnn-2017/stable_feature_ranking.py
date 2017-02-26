@@ -2,6 +2,8 @@
 # Early Stablizing Feature Importance for TensorFlow Deep Neural Networks
 #
 # Copyright 2016 by Jeff Heaton, Steven McElwee, & James Cannady, Ph.D.
+# Note: this version was tested with Google TensorFlow 0.80.
+# (this is the version that was used to generate the published results)
 from sklearn import preprocessing
 from sklearn.cross_validation import train_test_split
 from sklearn import metrics
