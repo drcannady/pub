@@ -434,9 +434,9 @@ def main():
     #names, x, y = load_wcbreast()
 
     # Choose the experiment to run
-    rank_compare_experiment(x, y, names, InputPerturbationRank, CorrelationCoefficientRank)
+    #rank_compare_experiment(x, y, names, InputPerturbationRank, CorrelationCoefficientRank)
     #rank_compare_experiment(x, y, names, WeightRank, InputPerturbationRank)
-    #rank_stability_experiment(x, y, names, HybridRank)
+    rank_stability_experiment(x, y, names, HybridRank)
 
 tf.logging.set_verbosity(tf.logging.ERROR)
 print(tf.__version__)
