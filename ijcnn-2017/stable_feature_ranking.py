@@ -211,7 +211,7 @@ class HybridRank(InputPerturbationRank):
         w_rank = self.weight_vector(network)
         c_rank = self.simple_vector(x, y)
 
-        d = (np.std(p_rank / sum(p_rank))) * 0.0
+        d = (np.std(p_rank / sum(p_rank))) 
 
         impt = w_rank + (p_rank * d) + (c_rank * (1.0 - d))
 
